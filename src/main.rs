@@ -2,6 +2,7 @@ use std::fs::DirEntry;
 use std::os::unix::fs::PermissionsExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
 use tabwriter::TabWriter;
 use std::io::Write;
 use std::collections::HashMap;
@@ -55,9 +56,7 @@ fn create_file_info(entry: &DirEntry) -> Option<FileInfo>{
     let file_size = human_readable_size(metadata.len());
 
     if let Ok(modified) = metadata.modified() {
-        let duration = modified.duration_since(UNIX_EPOCH).unwrap();
-        let datetime: DateTime<Utc> = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH + duration);
-        let mod_time = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
+        let mod_time = get_last_modifed_by_tz(modified);
         let mut kind = FileType::FILE;
 
         if file_type.is_dir() {
@@ -76,6 +75,21 @@ fn create_file_info(entry: &DirEntry) -> Option<FileInfo>{
     } else { return None }
 }
 
+fn get_last_modifed_by_tz(modified_at: SystemTime) -> String {
+    let duration = modified_at.duration_since(UNIX_EPOCH).unwrap();
+    let tz_str = fs::read_to_string("/etc/timezone").unwrap().trim().to_string();
+    let tz: Tz = match tz_str.parse() {
+        Ok(tz) => tz,
+        Err(_) => {
+            eprintln!("Invalid timezone defaulting to America/Chicago: {}", tz_str);
+            Tz::America__Chicago
+        }
+    };
+    let datetime_utc: DateTime<Utc> = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH + duration);
+    let datetime_local = datetime_utc.with_timezone(&tz);
+    datetime_local.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
 struct LongestFileInfoFields {
     name: usize,
     size: usize,
@@ -83,9 +97,9 @@ struct LongestFileInfoFields {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-enum FileType {
-    FILE,
+enum FileType {// Ordering matters here for cmp methods
     DIRECTORY,
+    FILE,
     EXECUTABLE
 }
 
