@@ -1,4 +1,3 @@
-use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc};
@@ -6,9 +5,19 @@ use tabwriter::TabWriter;
 use std::io::Write;
 use std::collections::HashMap;
 use std::path::Path;
-use std::env;
+use std::{env, fs};
 
 
+struct DirContents {
+    files: Vec<FileInfo>,
+    directories: Vec<FileInfo>,
+    executables: Vec<FileInfo>
+}
+struct FileInfo {
+    name: String,
+    readable_size: String,
+    modified_at: String
+}
 fn main() {
     // Get command-line arguments
     let args: Vec<String> = env::args().collect();
@@ -26,12 +35,8 @@ fn main() {
     match full_path {
         Ok(path) => {
             if path.is_dir() {
-                let (
-                    files, 
-                    directories, 
-                    executables
-                ) = extract_files_from_path(dir_path);
-                print(&directories, &files, &executables);
+                let dir_contents = extract_files_from_path(dir_path);
+                print(&dir_contents);
             } else {
                 eprintln!("❌ Error: '{}' is not a directory.", dir_path);
             }
@@ -42,10 +47,10 @@ fn main() {
     }
 }
 
-fn extract_files_from_path(path: &str) -> (Vec<(String, String, String)>, Vec<(String, String, String)>, Vec<(String, String, String)>){
-    let mut files = Vec::new();
-    let mut directories = Vec::new();
-    let mut executables = Vec::new();
+fn extract_files_from_path(path: &str) -> DirContents {
+    let mut files: Vec<FileInfo> = Vec::new();
+    let mut directories: Vec<FileInfo> = Vec::new();
+    let mut executables: Vec<FileInfo> = Vec::new();
 
     // Read directory entries
     if let Ok(entries) = fs::read_dir(path) {
@@ -71,89 +76,95 @@ fn extract_files_from_path(path: &str) -> (Vec<(String, String, String)>, Vec<(S
 
                     // Categorize items
                     if file_type.is_dir() {
-                        directories.push((file_name, file_size, mod_time));
+                        directories.push(FileInfo {
+                            name: file_name,
+                            readable_size: file_size,
+                            modified_at: mod_time
+                        })
                     } else if file_type.is_file() {
                         if metadata.permissions().mode() & 0o111 != 0 {
-                            executables.push((file_name, file_size, mod_time));
+                            executables.push(FileInfo {
+                                name: file_name,
+                                readable_size: file_size,
+                                modified_at: mod_time
+                            })
                         } else {
-                            files.push((file_name, file_size, mod_time));
+                            files.push(FileInfo { 
+                                name: file_name, 
+                                readable_size: file_size, 
+                                modified_at: mod_time 
+                            });
                         }
                     }
                 }
             }
         }
     }
-    files.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
-    directories.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
-    executables.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
-    return (files, directories, executables)
+    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    directories.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    executables.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    DirContents {
+        files,
+        directories,
+        executables
+    }
 }
 
-fn print(directories: &Vec<(String, String, String)>, files: &Vec<(String, String, String)>, executables: &Vec<(String, String, String)>) {
+fn print(dir_contents: &DirContents) {
     let mut tw = TabWriter::new(std::io::stdout()).padding(4);
-    let (date_len, size_len, name_len) = get_longest_entry(directories, files, executables);
-    let modified_delim: String = std::iter::repeat('-').take(date_len).collect();
-    let size_delim: String = std::iter::repeat('-').take(size_len).collect();
-    let name_delim: String = std::iter::repeat('-').take(name_len).collect();
+    let max_lengths = get_longest_field_entries(dir_contents);
+    let modified_at_delim: String = std::iter::repeat('-').take(max_lengths.max_date_len).collect();
+    let size_of_delim: String = std::iter::repeat('-').take(max_lengths.max_size_len).collect();
+    let name_of_delim: String = std::iter::repeat('-').take(max_lengths.max_name_len).collect();
     
     writeln!(tw, "Modified\tSize\tName").unwrap();
-    writeln!(tw, "---{}\t{}\t{}", modified_delim, size_delim, name_delim).unwrap();
+    writeln!(tw, "---{}\t{}\t{}", modified_at_delim, size_of_delim, name_of_delim).unwrap();
     
-    for (name, size, date) in directories {
-        writeln!(tw, "📁 {}\t{}\t{}/", date, size, name).unwrap();
+    for entry in &dir_contents.directories {
+        writeln!(tw, "📁 {}\t{}\t{}/", entry.modified_at, entry.readable_size, entry.name).unwrap();
     }
 
-    for (name, size, date) in files {
-        writeln!(tw, "{} {}\t{}\t{}", get_file_emoji(name), date, size, name).unwrap();
+    for entry in &dir_contents.files {
+        writeln!(tw, "{} {}\t{}\t{}", get_file_emoji(&entry.name[..]), entry.modified_at, entry.readable_size, entry.name).unwrap();
     }
 
-    for (name, size, date) in executables {
-        writeln!(tw, "⚡ {}\t{}\t{}", date, size, name).unwrap();
+    for entry in &dir_contents.executables {
+        writeln!(tw, "⚡ {}\t{}\t{}", entry.modified_at, entry.readable_size, entry.name).unwrap();
     }
     tw.flush().unwrap();
 }
 
-fn get_longest_entry(directories: &Vec<(String, String, String)>, files: &Vec<(String, String, String)>, executables: &Vec<(String, String, String)>) -> (usize, usize, usize) {
+struct LongestFileInfoFields {
+    max_name_len: usize,
+    max_size_len: usize,
+    max_date_len: usize,
+}
+fn get_longest_field_entries(dir_contents: &DirContents) -> LongestFileInfoFields {
     let mut max_name_len: usize = 0;
     let mut max_size_len: usize = 0;
     let mut max_date_len: usize = 0;
 
-    for (name, size, date) in directories {
-        if name.len() > max_name_len {
-            max_name_len = name.len();
-        }
-        if size.len() > max_size_len {
-            max_size_len = size.len();
-        }
-        if date.len() > max_date_len {
-            max_date_len = date.len();
-        }
-    }
+    let mut update_max_lengths= |files: &Vec<FileInfo>|
+        for file in files {
+            if file.name.len() > max_name_len {
+                max_name_len = file.name.len();
+            }
+            if file.readable_size.len() > max_size_len {
+                max_size_len = file.readable_size.len();
+            }
+            if file.modified_at.len() > max_date_len {
+                max_date_len = file.modified_at.len();
+            }
+        };
+    update_max_lengths(&dir_contents.files);
+    update_max_lengths(&dir_contents.directories);
+    update_max_lengths(&dir_contents.executables);
 
-    for (name, size, date) in files {
-        if name.len() > max_name_len {
-            max_name_len = name.len();
-        }
-        if size.len() > max_size_len {
-            max_size_len = size.len();
-        }
-        if date.len() > max_date_len {
-            max_date_len = date.len();
-        }
+    LongestFileInfoFields {
+        max_name_len,
+        max_date_len,
+        max_size_len
     }
-
-    for (name, size, date) in executables {
-        if name.len() > max_name_len {
-            max_name_len = name.len();
-        }
-        if size.len() > max_size_len {
-            max_size_len = size.len();
-        }
-        if date.len() > max_date_len {
-            max_date_len = date.len();
-        }
-    }
-    return (max_date_len, max_size_len, max_name_len)
 }
 
 fn get_file_emoji(file_name: &str) -> &'static str {
