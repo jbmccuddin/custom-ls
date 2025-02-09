@@ -8,30 +8,16 @@ use std::path::Path;
 use std::{env, fs};
 
 
-struct DirContents {
-    files: Vec<FileInfo>,
-    directories: Vec<FileInfo>,
-    executables: Vec<FileInfo>
-}
-struct FileInfo {
-    name: String,
-    readable_size: String,
-    modified_at: String
-}
-fn main() {
-    // Get command-line arguments
-    let args: Vec<String> = env::args().collect();
 
-    // Determine the directory to use
+fn main() {
+    let args: Vec<String> = env::args().collect();
     let dir_path = if args.len() > 1 {
-        &args[1]  // Use provided path
+        &args[1]
     } else {
-        "."  // Default to current directory
+        "."
     };
 
-    // Resolve the absolute path
     let full_path = Path::new(dir_path).canonicalize();
-
     match full_path {
         Ok(path) => {
             if path.is_dir() {
@@ -52,7 +38,6 @@ fn extract_files_from_path(path: &str) -> DirContents {
     let mut directories: Vec<FileInfo> = Vec::new();
     let mut executables: Vec<FileInfo> = Vec::new();
 
-    // Read directory entries
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries {
             if let Ok(entry) = entry {
@@ -60,21 +45,17 @@ fn extract_files_from_path(path: &str) -> DirContents {
                 let file_type = metadata.file_type();
                 let file_name = entry.file_name().into_string().unwrap();
                 
-                // Skip "." and ".."
                 if file_name == "." || file_name == ".." {
                     continue;
                 }
 
-                // Get file size in human-readable format
                 let file_size = human_readable_size(metadata.len());
 
-                // Get last modification time
                 if let Ok(modified) = metadata.modified() {
                     let duration = modified.duration_since(UNIX_EPOCH).unwrap();
                     let datetime: DateTime<Utc> = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH + duration);
                     let mod_time = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
 
-                    // Categorize items
                     if file_type.is_dir() {
                         directories.push(FileInfo {
                             name: file_name,
@@ -110,6 +91,24 @@ fn extract_files_from_path(path: &str) -> DirContents {
     }
 }
 
+struct LongestFileInfoFields {
+    max_name_len: usize,
+    max_size_len: usize,
+    max_date_len: usize,
+}
+
+struct FileInfo {
+    name: String,
+    readable_size: String,
+    modified_at: String
+}
+
+struct DirContents {
+    files: Vec<FileInfo>,
+    directories: Vec<FileInfo>,
+    executables: Vec<FileInfo>
+}
+
 impl DirContents {
     fn print(&self) {
         let mut tw = TabWriter::new(std::io::stdout()).padding(4);
@@ -133,17 +132,8 @@ impl DirContents {
             writeln!(tw, "⚡ {}\t{}\t{}", entry.modified_at, entry.readable_size, entry.name).unwrap();
         }
         tw.flush().unwrap();
-    }   
-}
-
-
-struct LongestFileInfoFields {
-    max_name_len: usize,
-    max_size_len: usize,
-    max_date_len: usize,
-}
-
-impl DirContents {
+    }
+    
     fn get_longest_field_entries(&self) -> LongestFileInfoFields {
         let mut max_name_len: usize = 0;
         let mut max_size_len: usize = 0;
@@ -170,9 +160,8 @@ impl DirContents {
             max_date_len,
             max_size_len
         }
-    }   
+    }
 }
-
 
 fn get_file_emoji(file_name: &str) -> &'static str {
     let mut emoji_map = HashMap::new();
