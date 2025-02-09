@@ -35,8 +35,6 @@ fn main() {
 
 fn extract_files_from_path(path: &str) -> DirContents {
     let mut files: Vec<FileInfo> = Vec::new();
-    let mut directories: Vec<FileInfo> = Vec::new();
-    let mut executables: Vec<FileInfo> = Vec::new();
 
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries {
@@ -57,23 +55,26 @@ fn extract_files_from_path(path: &str) -> DirContents {
                     let mod_time = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
 
                     if file_type.is_dir() {
-                        directories.push(FileInfo {
+                        files.push(FileInfo {
                             name: file_name,
                             readable_size: file_size,
-                            modified_at: mod_time
+                            modified_at: mod_time,
+                            kind: FileType::DIRECTORY
                         })
                     } else if file_type.is_file() {
                         if metadata.permissions().mode() & 0o111 != 0 {
-                            executables.push(FileInfo {
+                            files.push(FileInfo {
                                 name: file_name,
                                 readable_size: file_size,
-                                modified_at: mod_time
+                                modified_at: mod_time,
+                                kind: FileType::EXECUTABLE
                             })
                         } else {
                             files.push(FileInfo { 
                                 name: file_name, 
                                 readable_size: file_size, 
-                                modified_at: mod_time 
+                                modified_at: mod_time,
+                                kind: FileType::FILE
                             });
                         }
                     }
@@ -81,14 +82,8 @@ fn extract_files_from_path(path: &str) -> DirContents {
             }
         }
     }
-    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    directories.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    executables.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    DirContents {
-        files,
-        directories,
-        executables
-    }
+    files.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.name.cmp(&b.name)));
+    DirContents { files }
 }
 
 struct LongestFileInfoFields {
@@ -97,16 +92,22 @@ struct LongestFileInfoFields {
     max_date_len: usize,
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum FileType {
+    FILE,
+    DIRECTORY,
+    EXECUTABLE
+}
+
 struct FileInfo {
     name: String,
     readable_size: String,
-    modified_at: String
+    modified_at: String,
+    kind: FileType
 }
 
 struct DirContents {
-    files: Vec<FileInfo>,
-    directories: Vec<FileInfo>,
-    executables: Vec<FileInfo>
+    files: Vec<FileInfo>
 }
 
 impl DirContents {
@@ -119,18 +120,15 @@ impl DirContents {
     
         writeln!(tw, "Modified\tSize\tName").unwrap();
         writeln!(tw, "---{}\t{}\t{}", modified_at_delim, size_of_delim, name_of_delim).unwrap();
-    
-        for entry in &self.directories {
-            writeln!(tw, "📁 {}\t{}\t{}/", entry.modified_at, entry.readable_size, entry.name).unwrap();
-        }
 
         for entry in &self.files {
-            writeln!(tw, "{} {}\t{}\t{}", get_file_emoji(&entry.name[..]), entry.modified_at, entry.readable_size, entry.name).unwrap();
+            match entry.kind {
+                FileType::DIRECTORY => writeln!(tw, "📁 {}\t{}\t{}/", entry.modified_at, entry.readable_size, entry.name).unwrap(),
+                FileType::FILE => writeln!(tw, "{} {}\t{}\t{}", get_file_emoji(&entry.name[..]), entry.modified_at, entry.readable_size, entry.name).unwrap(),
+                FileType::EXECUTABLE => writeln!(tw, "⚡ {}\t{}\t{}", entry.modified_at, entry.readable_size, entry.name).unwrap()
+            }
         }
-
-        for entry in &self.executables {
-            writeln!(tw, "⚡ {}\t{}\t{}", entry.modified_at, entry.readable_size, entry.name).unwrap();
-        }
+        
         tw.flush().unwrap();
     }
     
@@ -152,9 +150,6 @@ impl DirContents {
                 }
             };
         update_max_lengths(&self.files);
-        update_max_lengths(&self.directories);
-        update_max_lengths(&self.executables);
-
         LongestFileInfoFields {
             max_name_len,
             max_date_len,
