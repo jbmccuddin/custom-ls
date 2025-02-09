@@ -1,3 +1,4 @@
+use std::fs::DirEntry;
 use std::os::unix::fs::PermissionsExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc};
@@ -11,17 +12,28 @@ use std::{env, fs};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let dir_path = if args.len() > 1 {
-        &args[1]
-    } else {
-        "."
-    };
+    let dir_path = if args.len() > 1 { &args[1] } else { "." };
 
     let full_path = Path::new(dir_path).canonicalize();
     match full_path {
         Ok(path) => {
             if path.is_dir() {
-                let dir_contents = extract_files_from_path(dir_path);
+                let mut files: Vec<FileInfo> = Vec::new();
+
+                if let Ok(entries) = fs::read_dir(path) {
+                    for entry in entries {
+                        if let Ok(entry) = entry {
+                            if let Some(file_info) = create_file_info(&entry) {
+                                files.push(file_info);
+                            }
+                        }
+                    }
+                }
+                
+                files.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.name.cmp(&b.name)));
+                
+                let dir_contents = DirContents { files };
+                
                 dir_contents.print();
             } else {
                 eprintln!("❌ Error: '{}' is not a directory.", dir_path);
@@ -33,63 +45,41 @@ fn main() {
     }
 }
 
-fn extract_files_from_path(path: &str) -> DirContents {
-    let mut files: Vec<FileInfo> = Vec::new();
+fn create_file_info(entry: &DirEntry) -> Option<FileInfo>{
+    let metadata = entry.metadata().unwrap();
+    let file_type = metadata.file_type();
+    let file_name = entry.file_name().into_string().unwrap();
+    if file_name == "." || file_name == ".." {
+        return None;
+    }
+    let file_size = human_readable_size(metadata.len());
 
-    if let Ok(entries) = fs::read_dir(path) {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let metadata = entry.metadata().unwrap();
-                let file_type = metadata.file_type();
-                let file_name = entry.file_name().into_string().unwrap();
-                
-                if file_name == "." || file_name == ".." {
-                    continue;
-                }
+    if let Ok(modified) = metadata.modified() {
+        let duration = modified.duration_since(UNIX_EPOCH).unwrap();
+        let datetime: DateTime<Utc> = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH + duration);
+        let mod_time = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
+        let mut kind = FileType::FILE;
 
-                let file_size = human_readable_size(metadata.len());
-
-                if let Ok(modified) = metadata.modified() {
-                    let duration = modified.duration_since(UNIX_EPOCH).unwrap();
-                    let datetime: DateTime<Utc> = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH + duration);
-                    let mod_time = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
-
-                    if file_type.is_dir() {
-                        files.push(FileInfo {
-                            name: file_name,
-                            readable_size: file_size,
-                            modified_at: mod_time,
-                            kind: FileType::DIRECTORY
-                        })
-                    } else if file_type.is_file() {
-                        if metadata.permissions().mode() & 0o111 != 0 {
-                            files.push(FileInfo {
-                                name: file_name,
-                                readable_size: file_size,
-                                modified_at: mod_time,
-                                kind: FileType::EXECUTABLE
-                            })
-                        } else {
-                            files.push(FileInfo { 
-                                name: file_name, 
-                                readable_size: file_size, 
-                                modified_at: mod_time,
-                                kind: FileType::FILE
-                            });
-                        }
-                    }
-                }
+        if file_type.is_dir() {
+            kind = FileType::DIRECTORY;
+        } else if file_type.is_file() {
+            if metadata.permissions().mode() & 0o111 != 0 {
+                kind = FileType::EXECUTABLE;
             }
         }
-    }
-    files.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.name.cmp(&b.name)));
-    DirContents { files }
+        return Some(FileInfo{
+            name: file_name,
+            readable_size: file_size,
+            modified_at: mod_time,
+            kind
+        })
+    } else { return None }
 }
 
 struct LongestFileInfoFields {
-    max_name_len: usize,
-    max_size_len: usize,
-    max_date_len: usize,
+    name: usize,
+    size: usize,
+    date: usize,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -114,9 +104,9 @@ impl DirContents {
     fn print(&self) {
         let mut tw = TabWriter::new(std::io::stdout()).padding(4);
         let max_lengths = self.get_longest_field_entries();
-        let modified_at_delim: String = std::iter::repeat('-').take(max_lengths.max_date_len).collect();
-        let size_of_delim: String = std::iter::repeat('-').take(max_lengths.max_size_len).collect();
-        let name_of_delim: String = std::iter::repeat('-').take(max_lengths.max_name_len).collect();
+        let modified_at_delim: String = std::iter::repeat('-').take(max_lengths.date).collect();
+        let size_of_delim: String = std::iter::repeat('-').take(max_lengths.size).collect();
+        let name_of_delim: String = std::iter::repeat('-').take(max_lengths.name).collect();
     
         writeln!(tw, "Modified\tSize\tName").unwrap();
         writeln!(tw, "---{}\t{}\t{}", modified_at_delim, size_of_delim, name_of_delim).unwrap();
@@ -151,9 +141,9 @@ impl DirContents {
             };
         update_max_lengths(&self.files);
         LongestFileInfoFields {
-            max_name_len,
-            max_date_len,
-            max_size_len
+            name: max_name_len,
+            date: max_date_len,
+            size: max_size_len
         }
     }
 }
