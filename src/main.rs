@@ -36,7 +36,7 @@ fn main() {
         Ok(path) => {
             if path.is_dir() {
                 let dir_contents = extract_files_from_path(dir_path);
-                print(&dir_contents);
+                dir_contents.print();
             } else {
                 eprintln!("❌ Error: '{}' is not a directory.", dir_path);
             }
@@ -110,62 +110,69 @@ fn extract_files_from_path(path: &str) -> DirContents {
     }
 }
 
-fn print(dir_contents: &DirContents) {
-    let mut tw = TabWriter::new(std::io::stdout()).padding(4);
-    let max_lengths = get_longest_field_entries(dir_contents);
-    let modified_at_delim: String = std::iter::repeat('-').take(max_lengths.max_date_len).collect();
-    let size_of_delim: String = std::iter::repeat('-').take(max_lengths.max_size_len).collect();
-    let name_of_delim: String = std::iter::repeat('-').take(max_lengths.max_name_len).collect();
+impl DirContents {
+    fn print(&self) {
+        let mut tw = TabWriter::new(std::io::stdout()).padding(4);
+        let max_lengths = self.get_longest_field_entries();
+        let modified_at_delim: String = std::iter::repeat('-').take(max_lengths.max_date_len).collect();
+        let size_of_delim: String = std::iter::repeat('-').take(max_lengths.max_size_len).collect();
+        let name_of_delim: String = std::iter::repeat('-').take(max_lengths.max_name_len).collect();
     
-    writeln!(tw, "Modified\tSize\tName").unwrap();
-    writeln!(tw, "---{}\t{}\t{}", modified_at_delim, size_of_delim, name_of_delim).unwrap();
+        writeln!(tw, "Modified\tSize\tName").unwrap();
+        writeln!(tw, "---{}\t{}\t{}", modified_at_delim, size_of_delim, name_of_delim).unwrap();
     
-    for entry in &dir_contents.directories {
-        writeln!(tw, "📁 {}\t{}\t{}/", entry.modified_at, entry.readable_size, entry.name).unwrap();
-    }
+        for entry in &self.directories {
+            writeln!(tw, "📁 {}\t{}\t{}/", entry.modified_at, entry.readable_size, entry.name).unwrap();
+        }
 
-    for entry in &dir_contents.files {
-        writeln!(tw, "{} {}\t{}\t{}", get_file_emoji(&entry.name[..]), entry.modified_at, entry.readable_size, entry.name).unwrap();
-    }
+        for entry in &self.files {
+            writeln!(tw, "{} {}\t{}\t{}", get_file_emoji(&entry.name[..]), entry.modified_at, entry.readable_size, entry.name).unwrap();
+        }
 
-    for entry in &dir_contents.executables {
-        writeln!(tw, "⚡ {}\t{}\t{}", entry.modified_at, entry.readable_size, entry.name).unwrap();
-    }
-    tw.flush().unwrap();
+        for entry in &self.executables {
+            writeln!(tw, "⚡ {}\t{}\t{}", entry.modified_at, entry.readable_size, entry.name).unwrap();
+        }
+        tw.flush().unwrap();
+    }   
 }
+
 
 struct LongestFileInfoFields {
     max_name_len: usize,
     max_size_len: usize,
     max_date_len: usize,
 }
-fn get_longest_field_entries(dir_contents: &DirContents) -> LongestFileInfoFields {
-    let mut max_name_len: usize = 0;
-    let mut max_size_len: usize = 0;
-    let mut max_date_len: usize = 0;
 
-    let mut update_max_lengths= |files: &Vec<FileInfo>|
-        for file in files {
-            if file.name.len() > max_name_len {
-                max_name_len = file.name.len();
-            }
-            if file.readable_size.len() > max_size_len {
-                max_size_len = file.readable_size.len();
-            }
-            if file.modified_at.len() > max_date_len {
-                max_date_len = file.modified_at.len();
-            }
-        };
-    update_max_lengths(&dir_contents.files);
-    update_max_lengths(&dir_contents.directories);
-    update_max_lengths(&dir_contents.executables);
+impl DirContents {
+    fn get_longest_field_entries(&self) -> LongestFileInfoFields {
+        let mut max_name_len: usize = 0;
+        let mut max_size_len: usize = 0;
+        let mut max_date_len: usize = 0;
 
-    LongestFileInfoFields {
-        max_name_len,
-        max_date_len,
-        max_size_len
-    }
+        let mut update_max_lengths= |files: &Vec<FileInfo>|
+            for file in files {
+                if file.name.len() > max_name_len {
+                    max_name_len = file.name.len();
+                }
+                if file.readable_size.len() > max_size_len {
+                    max_size_len = file.readable_size.len();
+                }
+                if file.modified_at.len() > max_date_len {
+                    max_date_len = file.modified_at.len();
+                }
+            };
+        update_max_lengths(&self.files);
+        update_max_lengths(&self.directories);
+        update_max_lengths(&self.executables);
+
+        LongestFileInfoFields {
+            max_name_len,
+            max_date_len,
+            max_size_len
+        }
+    }   
 }
+
 
 fn get_file_emoji(file_name: &str) -> &'static str {
     let mut emoji_map = HashMap::new();
