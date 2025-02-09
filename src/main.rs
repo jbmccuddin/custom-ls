@@ -83,6 +83,9 @@ fn extract_files_from_path(path: &str) -> (Vec<(String, String, String)>, Vec<(S
             }
         }
     }
+    files.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    directories.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    executables.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
     return (files, directories, executables)
 }
 
